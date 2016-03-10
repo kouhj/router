@@ -1,0 +1,87 @@
+#!/bin/bash
+
+function usage {
+  echo "Usage: prepare_image image_type rootfs_image"
+  echo "Padd root image to the correct size"
+  exit 1
+}
+
+function pad_file {
+	TMPDIR=/mnt/hgfs/R
+	PADFILE=$TMPDIR/.0xff.bin
+	BLOCKSIZE=$3
+	((BLOCKCOUNT=$2/$3))
+	#echo "Padding $1 to size $2, BLOCKSIZE=$BLOCKSIZE, BLOCKCOUNT=$BLOCKCOUNT"
+	tr "\000" "\377" < /dev/zero | dd iflag=fullblock bs=$BLOCKSIZE count=$BLOCKCOUNT of=$PADFILE 2>/dev/null
+	dd if=$1 of=$PADFILE conv=notrunc 2>/dev/null
+	rm -f $1; mv $PADFILE $1
+}
+
+#filesize filestart padding
+function calc_pad {
+	[  $((($1) & ($2 - 1))) == 0 ] && {
+		echo $1
+		return 0
+        }
+	echo $(((($1) | ($2 - 1)) + 1))
+}
+
+function prep_squash {
+	#1k
+	rootfs_pad_size=$(calc_pad $rootfs_size  1024)
+	pad_file $rootfs_image $rootfs_pad_size 4096
+	echo -ne '\xde\xad\xc0\xde' >> $rootfs_image
+	((rootfs_size=rootfs_pad_size+4))
+	
+	#8k
+	rootfs_pad_size=$(calc_pad $rootfs_size  8192)
+	pad_file $rootfs_image $rootfs_pad_size 8192
+	echo -ne '\xde\xad\xc0\xde' >> $rootfs_image
+	((rootfs_size=rootfs_pad_size+4))
+	
+	#16k
+	rootfs_pad_size=$(calc_pad $rootfs_size  16384)
+	pad_file $rootfs_image $rootfs_pad_size 16384
+	echo -ne '\xde\xad\xc0\xde' >> $rootfs_image
+	((rootfs_size=rootfs_pad_size+4))
+
+	#64k
+	#rootfs_pad_size=$(calc_pad $rootfs_size  65536)
+	#pad_file $rootfs_image $rootfs_pad_size 65536
+	#echo -ne '\xde\xad\xc0\xde' >> $rootfs_image
+	#((rootfs_size=rootfs_pad_size+4))
+
+	#128k
+	rootfs_pad_size=$(calc_pad $rootfs_size  131072)
+	pad_file $rootfs_image $rootfs_pad_size 131072
+	echo -ne '\xde\xad\xc0\xde' >> $rootfs_image
+}
+
+
+image_type=$1
+rootfs_image=$2
+
+if [ -z "$image_type" ] || [ -z "$rootfs_image" ] ; then
+	usage
+fi
+
+if [ ! -e "$rootfs_image" ] ; then
+	echo "input file not found"
+	exit 1
+fi
+
+rootfs_size=$(stat -c "%s" "$rootfs_image")
+
+if [ $rootfs_size == 0 ]; then
+	echo "kernel or rootfs empty"
+	exit 1
+fi
+
+case $image_type in
+	squashfs )
+		prep_squash ;;
+	* )
+		echo "Unknown image type"
+		exit 1 ;;
+esac
+
